@@ -1,0 +1,32 @@
+# Ambiente virtual
+venv/
+env/
+ENV/
+
+# Arquivos de configuração com credenciais
+.env
+.env.txt
+*.env
+
+# Cache Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Logs
+logs/
+*.log
+
+# IDE files
+.idea/
+.vscode/
+
+# Ignorar arquivos de credenciais
+.env
+*.log
+__pycache__/
+*.pyc
+.vscode/
+.idea/
+venv/
