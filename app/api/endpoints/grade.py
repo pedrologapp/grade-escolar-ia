@@ -1,14 +1,17 @@
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..")))
 from sqlalchemy.orm import Session
-from fastapi import APIRouter, Depends, HTTPException, status, Body
+from fastapi import APIRouter, Depends, HTTPException, status, Body 
 from typing import Dict, Any
 from pydantic import BaseModel
+import traceback
 
-from app.models.database import get_db
-from app.services.grade_service import grade_service
+from ...models.database import get_db
+from ...services.grade_service import grade_service
 
-# Define um modelo Pydantic para a requisição de refinamento
+# Modelos Pydantic
 class RefineRequest(BaseModel):
-    current_schedule: Dict[str, Any]
     feedback: str
 
 router = APIRouter()
@@ -16,34 +19,36 @@ router = APIRouter()
 @router.post("/generate", response_model=Dict[str, Any])
 def generate_schedule(db: Session = Depends(get_db)):
     """Gera uma grade escolar otimizada."""
-    result = grade_service.generate_initial_schedule(db)
-    
-    if "error" in result:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=result["message"]
-        )
-    
-    return result
+    try:
+        result = grade_service.generate_initial_schedule(db)
+        if "error" in result:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=result["message"]
+            )
+        return result
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Erro ao gerar grade: {str(e)}")
 
 @router.post("/refine", response_model=Dict[str, Any])
 def refine_schedule(
-    request: RefineRequest,
+    feedback: str = Body(...),
     db: Session = Depends(get_db)
 ):
     """Refina uma grade escolar existente com base no feedback."""
-    result = grade_service.refine_schedule_with_feedback(
-        request.current_schedule, 
-        request.feedback
-    )
-    
-    if "error" in result:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=result["message"]
-        )
-    
-    return result
+    try:
+        print(f"Recebendo feedback para refinamento: {feedback}")
+        result = grade_service.refine_schedule_with_feedback(feedback, db)
+        if "error" in result:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=result["message"]
+            )
+        return result
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Falha ao refinar a grade: {str(e)}")
 
 @router.post("/save", response_model=Dict[str, Any])
 def save_schedule(
@@ -61,10 +66,8 @@ def save_schedule(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Falha ao salvar a grade no banco de dados: {message}"
             )
-        
         return {"message": message}
     except Exception as e:
-        import traceback
         error_details = traceback.format_exc()
         print(f"Erro ao salvar grade: {str(e)}")
         print(f"Detalhes do erro: {error_details}")
@@ -77,10 +80,11 @@ def save_schedule(
 def index_rules():
     """Indexa todas as regras para RAG."""
     try:
-        from app.services.rag_service import rag_service
+        from ...services.rag_service import rag_service
         rag_service.index_rules()
         return {"message": "Regras indexadas com sucesso!"}
     except Exception as e:
+        traceback.print_exc()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Erro ao indexar regras: {str(e)}"

@@ -82,6 +82,7 @@ class GradeService:
             "rules": rules_data
         }
     
+    
     def generate_initial_schedule(self, db: Session) -> Dict[str, Any]:
         """
         Gera uma grade inicial otimizada.
@@ -116,17 +117,20 @@ class GradeService:
                 "message": "Falha ao gerar grade inicial."
             }
     
-    def refine_schedule_with_feedback(self, current_schedule: Dict[str, Any], feedback: str) -> Dict[str, Any]:
+    def refine_schedule_with_feedback(self, feedback: str, db: Session) -> Dict[str, Any]:
         """
-        Refina uma grade existente com base no feedback do usuário.
+        Processa o feedback do usuário e refina a grade escolar.
         
         Args:
-            current_schedule: Grade atual
             feedback: Feedback do usuário
+            db: Sessão do banco de dados
             
         Returns:
             Grade refinada
         """
+        if not feedback:
+            return {"error": "Nenhum feedback fornecido", "message": "Forneça um feedback válido."}
+        
         try:
             # Usar RAG para encontrar regras relevantes com base no feedback
             try:
@@ -142,8 +146,8 @@ class GradeService:
                 print(f"Erro ao usar RAG: {e}. Continuando sem enriquecimento de feedback.")
                 enhanced_feedback = feedback
             
-            # Refinar a grade com o feedback (enriquecido ou não)
-            result = ai_service.refine_schedule(current_schedule, enhanced_feedback)
+            # Chama a IA para interpretar o feedback e refinar a grade
+            result = ai_service.refine_schedule_with_feedback(enhanced_feedback, db)
             
             if result["success"]:
                 return {

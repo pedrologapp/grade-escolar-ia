@@ -2,6 +2,7 @@ import uvicorn
 from fastapi import FastAPI
 from dotenv import load_dotenv
 from app.models.database import init_db
+from contextlib import asynccontextmanager
 
 # Tentar importar o router da API
 try:
@@ -14,22 +15,25 @@ except ImportError:
 # Carregar variáveis de ambiente
 load_dotenv()
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print("Aplicação iniciando...")
+    init_db()  # Inicializar o banco de dados na inicialização
+    yield
+    print("Aplicação encerrando...")
+
 # Criar a aplicação FastAPI
 app = FastAPI(
     title="Sistema de Otimização de Grade Escolar",
     description="API para otimização de grade escolar com IA",
-    version="0.1.0"
+    version="0.1.0",
+    lifespan=lifespan
 )
 
 # Incluir o router da API se disponível
 if has_api_router:
     app.include_router(api_router, prefix="/api")
 
-# Inicializar banco de dados na inicialização (comentado por enquanto)
-@app.on_event("startup")
-def startup_event():
-    init_db()
-    
 # Rota básica para teste
 @app.get("/")
 async def root():

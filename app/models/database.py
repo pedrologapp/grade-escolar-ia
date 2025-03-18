@@ -16,8 +16,7 @@ DB_NAME = os.getenv("DB_NAME", "grade_escolar")
 
 
 # Construir URL de conexão manualmente
-SQLALCHEMY_DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-
+SQLALCHEMY_DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/grade_escolar"
 # Criar engine do SQLAlchemy
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL,

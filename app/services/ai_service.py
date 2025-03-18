@@ -10,6 +10,8 @@ from app.models.turma import Turma
 from app.models.horario import Horario
 from app.models.regra import Regra
 
+# Remova a importação do rag_service daqui
+
 class AIService:
     def __init__(self):
         """Inicializa o serviço de IA com a API da OpenAI."""
@@ -21,6 +23,42 @@ class AIService:
         self.client = OpenAI(api_key=self.api_key)
         self.model = "gpt-4-turbo"
         print("AI Service inicializado com OpenAI")
+
+    def extract_rules_from_feedback(self, feedback: str) -> Dict[str, Any]:
+        """
+        Extrai regras estruturadas a partir do feedback em linguagem natural.
+        """
+        try:
+            prompt = f"""
+            Analise o seguinte feedback do usuário sobre uma grade escolar e extraia regras estruturadas:
+            
+            "{feedback}"
+            
+            Extraia todas as regras, restrições e preferências mencionadas no formato JSON.
+            Cada regra deve ter: professor, restrição, dias permitidos, horário máximo e ação necessária.
+            
+            Exemplo de formato:
+            [
+              {{
+                "professor": "Carlos Silva",
+                "restricao": "Não pode dar aulas",
+                "dias_permitidos": ["Segunda", "Quarta", "Sexta"],
+                "horario_maximo": "18:00",
+                "acao": "Realocar aulas",
+                "dados_extras": {{"motivo": "Compromisso pessoal"}}
+              }}
+            ]
+            """
+            
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "system", "content": prompt}],
+                max_tokens=1000
+            )
+            
+            return {"success": True, "rules": response.choices[0].message.content}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
     def extrair_professores_do_texto(self, feedback: str) -> List[str]:
         """
@@ -61,67 +99,95 @@ class AIService:
         except Exception as e:
             db.rollback()
             return {"success": False, "error": f"Erro ao adicionar professor: {str(e)}"}
-
-    def refine_schedule(self, current_schedule: Dict[str, Any], feedback: str, db: Session) -> Dict[str, Any]:
+    
+    def refine_schedule_with_feedback(self, feedback: str, db: Session) -> Dict[str, Any]:
         """
-        Refina a grade existente com base no feedback fornecido pelo usuário, preservando a estrutura original.
-        Se um professor não existir, pergunta ao usuário se deseja cadastrá-lo.
+        Usa IA para interpretar o feedback e refinar a grade. 
+        
+        Caso alguma informação já exista na base de dados, continuar, caso contrário, pergunta ao usuário se deseja cadastrá-lo. Por exemplo: Lucas é um professor! Mas Lucas não 
+        consta na base de dados, então pergunta se quer adiciona-lo!
         """
-        try:
-            if not feedback.strip():
-                return {"success": False, "error": "Feedback vazio. Forneça informações detalhadas para o refinamento."}
-
-            # Extraindo nomes dos professores mencionados no feedback
-            professores_no_feedback = self.extrair_professores_do_texto(feedback)
-
+        print(f"Feedback recebido pela IA: {feedback}")
+        
+        # Verificar se existem professores mencionados que não estão cadastrados
+        professores_no_feedback = self.extrair_professores_do_texto(feedback)
+        
+        if professores_no_feedback:
             # Verificando se esses professores existem no banco de dados
             professores_existentes = {prof.nome for prof in db.query(Professor).all()}
             professores_para_cadastrar = []
-
+            
             for professor in professores_no_feedback:
                 if professor not in professores_existentes:
                     professores_para_cadastrar.append(professor)
-
+            
+            # Se houver professores não cadastrados, perguntar ao usuário
             if professores_para_cadastrar:
                 return {
                     "success": False,
                     "error": f"Os seguintes professores não estão cadastrados no sistema: {', '.join(professores_para_cadastrar)}. "
-                             "Você deseja adicioná-los? Se sim, forneça nome, e-mail e área de atuação para cada professor."
+                            "Você deseja adicioná-los? Se sim, forneça nome, e-mail e área de atuação para cada professor."
                 }
-
-            # Se todos os professores existirem, prossegue com o refinamento da grade
-            prompt = f"""
-            Você é um assistente especializado em otimização de grade escolar.
-
-            O usuário forneceu o seguinte feedback:
-            "{feedback}"
-
-            Aqui está a grade atual:
-            {json.dumps(current_schedule, indent=2)}
-
-            **Importante:**
-            - NÃO remova nenhuma disciplina ou professor da grade existente.
-            - Ajuste apenas os horários dos professores mencionados no feedback.
-            - Se um professor estiver indisponível, realoque as aulas para outros professores disponíveis.
-            - Mantenha a estrutura original da grade intacta.
-
-            Retorne a nova grade em formato JSON, mantendo a estrutura original e aplicando apenas as alterações necessárias.
-            """
-
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "system", "content": prompt}],
-                max_tokens=1000
+        
+        # Aqui a IA interpreta o feedback e extrai regras
+        regras_extraidas = self.extract_rules_from_feedback(feedback)
+        
+        if not regras_extraidas.get("success"):
+            return {"error": "Erro ao extrair regras da IA.", "message": "Falha ao refinar a grade."}
+        
+        try:
+            regras = json.loads(regras_extraidas.get("rules", "[]"))
+        except json.JSONDecodeError:
+            return {"error": "Erro ao decodificar regras extraídas", "message": "Falha ao interpretar as regras."}
+        
+        # Salvar as regras no banco usando uma nova função interna
+        for regra in regras:
+            self._salvar_regra_no_banco(
+                db,
+                professor=regra.get("professor", "Desconhecido"),
+                restricao=regra.get("restricao", "Não especificada"),
+                dias_permitidos=regra.get("dias_permitidos", []),
+                horario_maximo=regra.get("horario_maximo", "Não especificado"),
+                acao=regra.get("acao", "Nenhuma ação"),
+                dados_extras=regra.get("dados_extras", {})
             )
-
-            try:
-                new_schedule = json.loads(response.choices[0].message.content)
-                return {"success": True, "schedule": new_schedule}
-            except json.JSONDecodeError:
-                return {"success": False, "error": "Erro ao processar a nova grade. A IA não retornou um JSON válido."}
-
+        
+        print("Regras extraídas e salvas com sucesso!")
+        
+        return {
+            "success": True,
+            "schedule": "Grade refinada com as novas regras!",
+            "message": "Grade refinada com sucesso!"
+        }
+        
+    def _salvar_regra_no_banco(self, db: Session, professor: str, restricao: str, 
+                               dias_permitidos: list, horario_maximo: str, acao: str, 
+                               dados_extras: dict = None):
+        """
+        Salva uma regra no banco de dados.
+        """
+        try:
+            nova_regra = Regra(
+                nome=f"Regra para {professor}",
+                descricao=restricao,
+                tipo="Restrição",
+                condicoes={
+                    "professor": professor,
+                    "restricao": restricao,
+                    "dias_permitidos": dias_permitidos,
+                    "horario_maximo": horario_maximo,
+                    "acao": acao,
+                    "dados_extras": dados_extras
+                }
+            )
+            db.add(nova_regra)
+            db.commit()
+            db.refresh(nova_regra)
+            return nova_regra
         except Exception as e:
-            return {"success": False, "error": f"Falha ao refinar a grade: {str(e)}"}
+            db.rollback()
+            print(f"Erro ao salvar regra: {str(e)}")
+            return None
 
 # Instância singleton do serviço
 ai_service = AIService()
